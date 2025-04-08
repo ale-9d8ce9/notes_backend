@@ -4,22 +4,22 @@ var mysql = require('mysql2')
 var dotenv = require('./dotenv').dotenv
 
 http.createServer(function (req, res) {
-    res.writeHead(200, {'Content-Type': 'text/plain'})
     var q = url.parse(req.url, true)
-    res.write(JSON.stringify(q.query))
-    res.write(q.pathname)
-    res.end('\nHello World\n<hi>')
+    console.log('\nnew request: ' + q.pathname)
+    switch (q.pathname) {
+        case '/':
+            res.writeHead(200, {'Content-Type': 'text/html'})
+            res.write('<h1>Welcome ale\'s server</h1>')
+            res.end('</>')
+            break;
+        case '/notes':
+            var notes = require('./notes/index')
+            notes.run(res, dotenv, mysql, q.query)
+            break;
+    
+        default:
+            break;
+    }
 }).listen(8080)
 
 
-var con = mysql.createConnection({
-    host: "localhost",
-    user: dotenv.user,
-    password: dotenv.password,
-    database: dotenv.database
-})
-
-con.connect(function(err) {
-    if (err) throw err
-    console.log("Connected!")
-});
