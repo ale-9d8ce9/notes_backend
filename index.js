@@ -9,12 +9,12 @@ http.createServer(function (req, res) {
     switch (q.pathname) {
         case '/':
             res.writeHead(200, {'Content-Type': 'text/html'})
-            res.write('<h1>Welcome ale\'s server</h1>')
-            res.end('</>')
+            res.write('<h1>server</h1>')
+            res.end()
             break;
         case '/notes':
             var notes = require('./notes/index')
-            notes.run(res, dotenv, mysql, q.query)
+            notes.run(res, dotenv, mysql, q.query, req)
             break;
     
         default:

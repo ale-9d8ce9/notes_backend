@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "formidable": "^3.5.2",
     "mysql2": "^3.14.0"
   }
 }
