@@ -1,20 +1,23 @@
-// Description: This is the main file for the notes app. It connects to the database and handles the requests.
+
 let sql
 let query
 let res
-let actionResult
+let responseMessage
 let fs
 let req
+let body
 
-exports.run = function (r, dotenv, mysql, q, request) {
-    query = q
-    res = r
-    fs = require('fs')
+exports.run = function (request, r, b, dotenv, mysql, q) {
     req = request
+    res = r
+    body = JSON.parse(b)
+    dotenv = dotenv
+    mysql = mysql
+    query = q
+    fs = require('fs')
     
     console.log("query: " + JSON.stringify(query))
 
-    // connect to mysql
     sql = mysql.createConnection({
         host: "localhost",
         user: dotenv.user,
@@ -23,60 +26,336 @@ exports.run = function (r, dotenv, mysql, q, request) {
     })
     sql.connect(function(err) {
         if (err) throw err
-        console.log("Connected!")
+        console.log("connected!")
     
-    // create table
-    sql.query("CREATE TABLE IF NOT EXISTS notes (id INT AUTO_INCREMENT PRIMARY KEY, username TEXT, password TEXT, listNotes JSON)", function (err, result) {
+    sql.query("CREATE TABLE IF NOT EXISTS notes (id INT AUTO_INCREMENT PRIMARY KEY, username TEXT, password TEXT)", function (err, result) {
         if (err) throw err
         console.log("Table ok")
 
+    body.username = body.username.trim()
+    body.password = body.password.trim()
 
     console.log("\naction: " + query.action)
     switch (query.action) {
         case 'addUser':
-            // add a user
-            if (query.username.trim() && query.password.trim()) {
-                addUser(query.username.trim(), query.password.trim())
+            if (body.username && body.password) {
+                addUser(body.username, body.password)
             }
-            break;
+            break
         case 'addNote':
-            // add a note to a user
-            if (query.username.trim() && query.password.trim()) {
-                addNote(query.username.trim(), query.password.trim(), JSON.parse(query.note.trim()))
+            if (body.username && body.password) {
+                addNote(body.username, body.password, JSON.parse(body.note))
             }
-            break;
+            break
         case 'getListNotes':
-            // get all notes of a user
-            if (query.username.trim() && query.password.trim()) {
-                getListNotes(query.username.trim(), query.password.trim())
+            if (body.username && body.password) {
+                getListNotes(body.username, body.password)
             }
-            break;
+            break
         case 'getNote':
-            // get a note
-            if (query.username.trim() && query.password.trim()) {
-                getNote(query.username.trim(), query.password.trim(), query.noteId)
+            if (body.username && body.password) {
+                getNote(body.username, body.password, body.noteId)
             }
-            break;
+            break
         case 'saveNote':
-            // save a note
-            if (query.username.trim() && query.password.trim()) {
-                saveNote(query.username.trim(), query.password.trim(), query.noteId)
+            if (body.username && body.password) {
+                saveNote(body.username, body.password, body.noteId, JSON.parse(body.note))
             }
-            break;
+            break
         default:
             console.log("No action specified")
             disconnectSQL()
-            break;
+            break
     }
     })
     })
 }
 
 
+
+function addUser(username, password) {
+    let validUser = true
+    // check if username and password are valid
+    if (username.length < 5 || password.length < 6) {
+        //validUser = false
+        responseMessage = {
+            result: "error",
+            message: "Username or password too short"
+        }
+    }
+    if ((username.length > 20 || password.length > 40) && validUser) {
+        validUser = false
+        responseMessage = {
+            result: "error",
+            message: "Username or password too long"
+        }
+    }
+    if (!validUser) {
+        console.log("Invalid user")
+        // disconnect from database and write web response
+        disconnectSQL()
+        return
+    }
+    // start adding user to database
+    sql.query(`SELECT * FROM notes WHERE username = ?`,[username], function (err, result) {
+        if (err) throw err
+        if (result.length > 0) {
+            // if user already exists
+            console.log("user already exists")
+            responseMessage = {
+                result: "error",
+                message: "user already exists"
+            }
+            // disconnect from database and write web response
+            disconnectSQL()
+        } else {
+            // if user does not exist
+            console.log("user doesn't exist")
+            responseMessage = {
+                result: "error",
+                message: "unknown error"
+            }
+
+            console.log("adding user in the database")
+            sql.query(`INSERT INTO notes (username, password) VALUES ( ? , ? )`, [username, password], function (err, result) {
+                if (err) throw err
+                console.log("user added to database")
+
+                console.log("creating user folder")
+                findUser(username, password, function (user) {
+                    fs.mkdir(`./notes/data/${user.id}`,{recursive:true}, (err) => {
+                        if (err) throw err
+                        console.log("user folder created")
+
+                        console.log("creating user file")
+                        fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify({listNotes: []}), (err) => {
+                            if (err) throw err
+                            console.log("user file created")
+
+                            console.log("user added")
+                            responseMessage = {
+                                result: "success",
+                                message: "User added"
+                            }
+                            // disconnect from database and write web response
+                            disconnectSQL()
+                        })
+                    })
+                })
+            })
+        }
+    })
+}
+
+
+function addNote(username, password, noteHead) {
+    findUser(username, password, function (user) {
+        fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+            if (err) throw err
+            console.log("Note read")
+            data = JSON.parse(data)
+
+            // delete unnecessary values
+            delete noteHead.elements
+            delete noteHead.files
+            delete noteHead.editable
+            // path should look like this: YYYY/MM/DD/hh_mm_ss_xxx
+            noteHead.path = [
+                noteHead.dateCreated.split("T")[0].split("-").join("/"),
+                noteHead.dateCreated.split("T")[1].replace('.',':').split(":").join("_")
+            ].join("/").replace("Z", "")
+
+            data.listNotes.push(noteHead)
+            fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify(data), (err) => {
+                if (err) throw err
+
+                console.log("creating note folder")
+                fs.mkdir(`./notes/data/${user.id}/${noteHead.path}`,{recursive:true}, (err) => {
+                    if (err) throw err
+                    console.log("note folder created")
+                    responseMessage = {
+                        result: "success",
+                        message: "note added"
+                    }
+                    console.log("note added")
+                    disconnectSQL()
+                })
+            })
+        })
+    })
+}
+
+
+function getListNotes(username, password) {
+    findUser(username, password, function (user) {
+        fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+            if (err) throw err
+
+            console.log("user file read")
+            data = JSON.parse(data)
+            responseMessage = {
+                result: "success",
+                message: data.listNotes
+            }
+            // disconnect from database and write web response
+            disconnectSQL()
+        })
+    })
+}
+
+
+function getNote(username, password, noteId) {
+    findUser(username, password, function (user) {
+        fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+            if (err) throw err
+            console.log("user file read")
+            data = JSON.parse(data)
+            // check if note exists
+            if (data.listNotes.length > noteId) {
+                // get note
+                let note = data.listNotes[noteId]
+                responseMessage = {
+                    result: "success",
+                    message: note
+                }
+            } else {
+                console.log("Note does not exist")
+                responseMessage = {
+                    result: "error",
+                    message: "Note does not exist"
+                }
+            }
+            // disconnect from database and write web response
+            disconnectSQL()
+        })
+    })
+}
+
+
+function saveNote(username, password, noteId, note) {
+    findUser(username, password, function (user) {
+        // get note path
+        getNoteHead(user, noteId, function (noteHead) {
+            path = `./notes/data/${user.id}/${noteHead.path}`
+            console.log("note path: " + path)
+
+            // update note text elements and index
+            fs.writeFile(`${path}/elements.json`, JSON.stringify(note.elements), (err) => {
+                if (err) throw err
+                console.log("note basic data updated")
+            
+            // update note files
+            for (let i = 0; i < note.files.length; i++) {
+                let file = note.files[i]
+                if (file != null) {
+                    fs.writeFile(`${path}/file_${i}.json`, file.data, (err) => {
+                        if (err) throw err
+                        console.log(`note file ${i} updated`)
+                    })
+                }
+            }
+
+            // update note head
+            noteHead.dateModified = note.dateModified
+            noteHead.name = note.name
+            updateNoteHead(user, noteId, noteHead, function () {
+                responseMessage = {
+                    result: "success",
+                    message: "note updated"
+                }
+                // disconnect from database and write web response
+                disconnectSQL()
+            })
+
+            })
+        })
+    })
+}
+
+
+
+
+function findUser(username, password, callback) {
+    sql.query(`SELECT * FROM notes WHERE username = ? AND password = ?`, [username, password], function (err, result) {
+        if (err) throw err
+        // check if user exists
+        if (result.length == 1) {
+            console.log("User exists")
+            callback(result[0])
+        } else {
+            // if user does not exist
+            console.log("User does not exist")
+            responseMessage = {
+                result: "error",
+                message: "User does not exist"
+            }
+            disconnectSQL()
+            return null
+        }
+    })
+}
+
+
+function getNoteHead(user, noteId, callback) {
+    fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+        if (err) throw err
+        console.log("user file read")
+
+        data = JSON.parse(data)
+        if (data.listNotes.length > noteId) {
+            callback(data.listNotes[noteId])
+        } else {
+            console.log("Note does not exist")
+            responseMessage = {
+                result: "error",
+                message: "Note does not exist"
+            }
+            // disconnect from database and write web response
+            disconnectSQL()
+        }
+    })
+}
+
+
+function updateNoteHead(user, noteId, noteHead, callback) {
+    fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+        if (err) throw err
+        console.log("user file read")
+
+        data = JSON.parse(data)
+        // check if note exists
+        if (data.listNotes.length > noteId) {
+
+            // overwrite note head
+            data.listNotes[noteId] = noteHead
+            fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify(data), (err) => {
+                if (err) throw err
+
+                console.log("note head updated")
+                responseMessage = {
+                    result: "operation",
+                    message: "note head updated"
+                }
+                callback()
+            })
+        } else {
+            console.log("Note does not exist")
+            responseMessage = {
+                result: "error",
+                message: "Note does not exist"
+            }
+            // disconnect from database and write web response
+            disconnectSQL()
+        }
+    })
+    
+}
+
+
 function disconnectSQL() {
     sql.end(function(err) {
         if (err) throw err
-        console.log("Disconnected!")
+        console.log("disconnected")
         writeResponse()
     })
 }
@@ -86,275 +365,25 @@ function logDatabase(callback) {
     sql.query("SELECT * FROM notes", function (err, result, fields) {
         if (err) throw err
         console.log(result)
-        if (callback) {
-            callback()
-        } else {
-            disconnectSQL()
-        }
-    })
-}
-
-
-function addUser(username, password) {
-    let validUser = true
-
-    // check if username and password are too short
-    if (username.length < 5 || password.length < 6) {
-        //validUser = false
-        actionResult = {
-            status: "error",
-            message: "Username or password too short"
-        }
-    }
-    // check if username and password are too long
-    if ((username.length > 20 || password.length > 40) && validUser) {
-        validUser = false
-        actionResult = {
-            status: "error",
-            message: "Username or password too long"
-        }
-    }
-
-    if (validUser == false) {
-        console.log("Invalid user")
-        // disconnect from database and write web response
-        disconnectSQL()
-        return
-    }
-    // add user to database
-    sql.query(`SELECT * FROM notes WHERE username = ?`,[username], function (err, result) {
-        if (err) throw err
-        // check if user exists
-        if (result.length > 0) {
-            console.log("User already exists")
-            actionResult = {
-                status: "error",
-                message: "User already exists"
-            }
-            // disconnect from database and write web response
-            disconnectSQL()
-
-        } else {
-            console.log("User does not exist")
-            actionResult = {
-                status: "error",
-                message: "unknown error"
-            }
-            // add user to database
-            console.log("Adding user in the database")
-            sql.query(`INSERT INTO notes (username, password, listNotes) VALUES ( ? , ? , ? )`, [username, password, JSON.stringify([])], function (err, result) {
-                if (err) throw err
-
-                // creating user folder
-                console.log("Creating user folder")
-                sql.query(`SELECT * FROM notes WHERE username = ? AND password = ?`,[username, password], function (err, result) {
-                    if (err) throw err
-                    if (result.length == 1) {
-                        fs.mkdir(`./notes/data/${result[0].id}`,{recursive:true}, (err) => {
-                            if (err) throw err
-                            
-                            // user added
-                            console.log("User added")
-                            actionResult = {
-                                status: "success",
-                                message: "User added"
-                            }
-                            // disconnect from database and write web response
-                            disconnectSQL()
-                        })
-                    }
-                })
-            })
-        }
-    })
-}
-
-
-function addNote(username, password, note) {
-    // get user from database
-    sql.query(`SELECT * FROM notes WHERE username = ? AND password = ?`, [username,password], function (err, result) {
-        if (err) throw err
-
-        // check if user exists
-        if (result.length == 1) {
-            console.log("User exists")
-            console.log("adding note")
-
-            // push note
-            let listNotes = result[0].listNotes
-            let noteIndex = listNotes.length
-            listNotes.push(note)
-            sql.query(`UPDATE notes SET listNotes = ? WHERE username = ? AND password = ?`, [JSON.stringify(listNotes), username, password], function (err) {
-                if (err) throw err
-                console.log("Note added to database")
-                // creating note elements file
-                date = new Date(note.dateCreated)
-                fs.mkdir(`./notes/data/${result[0].id}/${date.getFullYear()}/${date.getMonth()}`,{recursive:true}, (err) => {
-                    if (err) throw err
-                    fs.writeFile(`./notes/data/${result[0].id}/${date.getFullYear()}/${date.getMonth()}/${noteIndex}.json`, JSON.stringify([]), (err) => {
-                        if (err) throw err
-                        console.log("Note file created")
-                        console.log("Note added")
-                        actionResult = {
-                            status: "success",
-                            message: "Note added"
-                        }
-                        // disconnect from database and write web response
-                        disconnectSQL()
-                    })
-                })
-            })
-        } else {
-            console.log("User does not exist")
-            actionResult = {
-                status: "error",
-                message: "User does not exist"
-            }
-            // disconnect from database and write web response
-            disconnectSQL()
-        }
-    })
-}
-
-
-function getListNotes(username, password) {
-    // get user from database
-    sql.query(`SELECT * FROM notes WHERE username = ? AND password = ?`, [username,password], function (err, result) {
-        if (err) throw err
-        // check if user exists
-        if (result.length == 1) {
-            console.log("User exists")
-            actionResult = {
-                status: "success",
-                message: JSON.stringify(result[0].listNotes)
-            }
-            console.log("note list ok")
-            // disconnect from database and write web response
-            disconnectSQL()
-        } else {
-            console.log("User does not exist")
-            actionResult = {
-                status: "error",
-                message: "User does not exist"
-            }
-            // disconnect from database and write web response
-            disconnectSQL()
-        }
-    })
-}
-
-
-function getNote(username, password, noteId) {
-    // get user from database
-    sql.query(`SELECT * FROM notes WHERE username = ? AND password = ?`, [username,password], function (err, result) {
-        if (err) throw err
-        // check if user exists
-        if (result.length == 1) {
-            console.log("User exists")
-            // check if note exists
-            console.log("noteId: " + noteId)
-            if (result[0].listNotes.length > noteId) {
-                note = result[0].listNotes[noteId]
-                date = new Date(note.dateCreated)
-                console.log(noteId)
-                fs.readFile(`./notes/data/${result[0].id}/${date.getFullYear()}/${date.getMonth()}/${noteId}.json`, 'utf8', (err, data) => {
-                    if (err) throw err
-                    console.log("Note read")
-                    actionResult = {
-                        status: "success",
-                        message: data
-                    }
-                    // disconnect from database and write web response
-                    disconnectSQL()
-                })
-            } else {
-                console.log("Note does not exist")
-                actionResult = {
-                    status: "error",
-                    message: "Note does not exist"
-                }
-                // disconnect from database and write web response
-                disconnectSQL()
-            }
-        } else {
-            console.log("User does not exist")
-            actionResult = {
-                status: "error",
-                message: "User does not exist"
-            }
-            // disconnect from database and write web response
-            disconnectSQL()
-        }
-    })
-}
-
-
-function saveNote(username, password, noteId, note) {
-    // get user from database
-    sql.query(`SELECT * FROM notes WHERE username = ? AND password = ?`, [username,password], function (err, result) {
-        if (err) throw err
-        // check if user exists
-        if (result.length == 1) {
-            console.log("User exists")
-            // check if note exists
-            console.log("noteId: " + noteId)
-            if (result[0].listNotes.length > noteId) {
-                // get data
-                let body = []
-                req.on('data', (chunk) => {
-                    body.push(chunk)
-                }).on('end', () => {
-                    // got body
-                    body = Buffer.concat(body).toString()
-                    console.log(body)
-                    // create folder if it does not exist
-                    console.log("creating folder")
-                    note = result[0].listNotes[noteId]
-                    date = new Date(note.dateCreated)
-                    fs.mkdir(`./notes/data/${result[0].id}/${date.getFullYear()}/${date.getMonth()}`,{recursive:true}, (err) => {
-                        if (err) throw err
-                        // write file
-                        console.log("writing file")
-                        fs.writeFile(`./notes/data/${result[0].id}/${date.getFullYear()}/${date.getMonth()}/${noteId}.json`, JSON.stringify(body), (err) => {
-                            if (err) throw err
-                            actionResult = {
-                                status: "success",
-                                message: "note saved"
-                            }
-                            console.log("note saved")
-                            disconnectSQL()
-                        })
-                    })
-                })
-            } else {
-                console.log("Note does not exist")
-                actionResult = {
-                    status: "error",
-                    message: "Note does not exist"
-                }
-                // disconnect from database and write web response
-                disconnectSQL()
-            }
-        } else {
-            console.log("User does not exist")
-            actionResult = {
-                status: "error",
-                message: "User does not exist"
-            }
-            // disconnect from database and write web response
-            disconnectSQL()
-        }
+        callback ? callback() : writeResponse()
     })
 }
 
 
 function writeResponse() {
-    res.writeHead(200, {
-        'Content-Type': 'text/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-    })
-    res.write(JSON.stringify(actionResult))
+    console.log(responseMessage)
+    res.write(JSON.stringify(responseMessage))
     res.end()
+    console.log("request done")
 }
+
+
+function decrypt(i) {
+    return atob(i)
+}
+
+function encrypt(i) {
+    return btoa(i)
+}
+
+
