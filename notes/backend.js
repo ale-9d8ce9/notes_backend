@@ -30,8 +30,8 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
         if (err) throw err
         console.log("Table ok")
 
-    body.username = body.username.trim()
-    body.password = body.password.trim()
+    body.username ? body.username = body.username.trim() : undefined
+    body.password ? body.password = body.password.trim() : undefined
 
     console.log("\naction: " + query.action)
     switch (query.action) {
@@ -52,13 +52,21 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
             break
         case 'getFullNote':
             if (body.username && body.password) {
-                getNote(body.username, body.password, body.noteId)
+                getFullNote(body.username, body.password, body.noteId)
             }
             break
         case 'saveNote':
             if (body.username && body.password) {
                 saveNote(body.username, body.password, body.noteId, JSON.parse(body.note))
             }
+            break
+        case 'ping':
+            console.log("ping")
+            responseMessage = {
+                result: "success",
+                message: "pong"
+            }
+            disconnectSQL()
             break
         default:
             console.log("No action specified")
@@ -132,6 +140,8 @@ function addUserChecks(username, password) {
             result: "error",
             message: "user creation is not allowed"
         }
+        // disconnect from database and write web response
+        disconnectSQL()
     }
 }
 
@@ -167,12 +177,12 @@ function addUserToDatabase(username, password) {
 
                 console.log("creating user folder")
                 findUser(username, password, function (user) {
-                    fs.mkdir(`./notes/data/${user.username}`,{recursive:true}, (err) => {
+                    fs.mkdir(`./notes/data/${user.id}`,{recursive:true}, (err) => {
                         if (err) throw err
                         console.log("user folder created")
 
                         console.log("creating user file")
-                        fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify({listNotes: []}), (err) => {
+                        fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify({listNotes: []}), (err) => {
                             if (err) throw err
                             console.log("user file created")
 
@@ -194,7 +204,7 @@ function addUserToDatabase(username, password) {
 
 function addNote(username, password, noteHead) {
     findUser(username, password, function (user) {
-        fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
+        fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
             if (err) throw err
             data = JSON.parse(data)
 
@@ -209,11 +219,11 @@ function addNote(username, password, noteHead) {
             ].join("/").replace("Z", "")
 
             data.listNotes.push(noteHead)
-            fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify(data), (err) => {
+            fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify(data), (err) => {
                 if (err) throw err
 
                 console.log("creating note folder")
-                fs.mkdir(`./notes/data/${user.username}/${noteHead.path}`,{recursive:true}, (err) => {
+                fs.mkdir(`./notes/data/${user.id}/${noteHead.path}`,{recursive:true}, (err) => {
                     if (err) throw err
                     console.log("note folder created")
                     responseMessage = {
@@ -231,7 +241,7 @@ function addNote(username, password, noteHead) {
 
 function getListNotes(username, password) {
     findUser(username, password, function (user) {
-        fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
+        fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
             if (err) throw err
 
             console.log("user file read")
@@ -250,7 +260,7 @@ function getListNotes(username, password) {
 function getFullNote(username, password, noteId) {
     findUser(username, password, function (user) {
         getNoteHead(user, noteId, function (noteHead) {
-            path = `./notes/data/${user.username}/${noteHead.path}`
+            path = `./notes/data/${user.id}/${noteHead.path}`
             console.log("note path: " + path)
 
             // read note text elements and index
@@ -261,14 +271,12 @@ function getFullNote(username, password, noteId) {
 
                 // read note files
                 noteHead.files = []
-                for (let i = 0; i < noteHead.elements.files.length; i++) {
+                for (let i = 0; i < noteHead.elements.length; i++) {
                     let filePath = `${path}/res${i}.bin`
                     if (fs.existsSync(filePath)) {
                         let fileData = fs.readFileSync(filePath)
                         noteHead.files.push({
                             data: fileData.toString('base64'),
-                            type: noteHead.elements.files[i].type,
-                            extension: noteHead.elements.files[i].extension
                         })
                     } else {
                         noteHead.files.push(null)
@@ -291,7 +299,7 @@ function saveNote(username, password, noteId, note) {
     findUser(username, password, function (user) {
         // get note path
         getNoteHead(user, noteId, function (noteHead) {
-            path = `./notes/data/${user.username}/${noteHead.path}`
+            path = `./notes/data/${user.id}/${noteHead.path}`
             console.log("note path: " + path)
 
             // for all files
@@ -403,7 +411,7 @@ function findUser(username, password, callback) {
 
 
 function getNoteHead(user, noteId, callback) {
-    fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
+    fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
         if (err) throw err
         console.log("user file read")
 
@@ -424,7 +432,7 @@ function getNoteHead(user, noteId, callback) {
 
 
 function updateNoteHead(user, noteId, noteHead, callback) {
-    fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
+    fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
         if (err) throw err
         console.log("user file read")
 
@@ -434,7 +442,7 @@ function updateNoteHead(user, noteId, noteHead, callback) {
 
             // overwrite note head
             data.listNotes[noteId] = noteHead
-            fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify(data), (err) => {
+            fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify(data), (err) => {
                 if (err) throw err
 
                 console.log("note head updated")
