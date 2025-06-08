@@ -1,7 +1,11 @@
 var http = require('http')
 var url = require('url')
 var mysql = require('mysql2')
+
+// Load environment variables from ".env" file
 var dotenv = require('./dotenv').dotenv
+
+// Load the notes module and its configuration
 var notes = require('./notes/backend')
 
 http.createServer((req, res) => {

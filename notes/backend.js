@@ -1,5 +1,5 @@
 
-exports.run = function (request, response, b, dotenv, mysql, q) {
+exports.run = function (request, response, b, dotenv, mysql, q, set) {
     req = request
     res = response
     body = JSON.parse(b)
@@ -7,7 +7,13 @@ exports.run = function (request, response, b, dotenv, mysql, q) {
     mysql = mysql
     query = q
     fs = require('fs')
-    
+    settings = JSON.parse(fs.readFileSync('./notes/config.json', 'utf8'))
+
+    responseMessage = {
+        result: "error",
+        message: "Unknown error"
+    }
+
     console.log("query: " + JSON.stringify(query))
 
     sql = mysql.createConnection({
@@ -31,7 +37,7 @@ exports.run = function (request, response, b, dotenv, mysql, q) {
     switch (query.action) {
         case 'addUser':
             if (body.username && body.password) {
-                addUser(body.username, body.password)
+                addUserChecks(body.username, body.password)
             }
             break
         case 'addNote':
@@ -64,33 +70,78 @@ exports.run = function (request, response, b, dotenv, mysql, q) {
 }
 
 
+function addUserChecks(username, password) {
+    console.log("adding user: " + username)
+    // checks
+    if (settings.allowUserCreation) {
+        if (!username || !password) {
+            responseMessage = {
+                result: "error",
+                message: "username or password not specified"
+            }
+            console.log("username or password not specified")
+            // disconnect from database and write web response
+            disconnectSQL()
 
-function addUser(username, password) {
-    let validUser = true
-    // check if username and password are valid
-    if (username.length < 5 || password.length < 6) {
-        //validUser = false
+        } else {
+            sql.query('SELECT * FROM notes', [], function (err, result) {
+                if (err) throw err
+
+                if (result.length < settings.maxUsers) {
+                    delete result
+                    // if the number of users is less than or equal to the maximum number of users
+                    let validUser = true
+                    // check if username and password are valid
+                    if (username.length < 5 || password.length < 6) {
+                        //validUser = false
+                        responseMessage = {
+                            result: "error",
+                            message: "username or password too short"
+                        }
+                    }
+                    if ((username.length > 20 || password.length > 40) && validUser) {
+                        validUser = false
+                        responseMessage = {
+                            result: "error",
+                            message: "username or password too long"
+                        }
+                    }
+                    if (!validUser) {
+                        console.log("invalid user")
+                        // disconnect from database and write web response
+                        disconnectSQL()
+                    } else {
+                        console.log("can add user")
+                        addUserToDatabase(username, password)
+                    }
+                } else {
+                    // if the number of users is equal to the maximum number of users
+                    console.log("too many users")
+                    responseMessage = {
+                        result: "error",
+                        message: "max number of users reached for this server"
+                    }
+                    // disconnect from database and write web response
+                    disconnectSQL()
+                }
+            })
+        }
+    } else {
+        console.log("user creation is not allowed")
         responseMessage = {
             result: "error",
-            message: "Username or password too short"
+            message: "user creation is not allowed"
         }
     }
-    if ((username.length > 20 || password.length > 40) && validUser) {
-        validUser = false
-        responseMessage = {
-            result: "error",
-            message: "Username or password too long"
-        }
-    }
-    if (!validUser) {
-        console.log("Invalid user")
-        // disconnect from database and write web response
-        disconnectSQL()
-        return
-    }
+}
+
+
+
+function addUserToDatabase(username, password) {
     // start adding user to database
     sql.query(`SELECT * FROM notes WHERE username = ?`,[username], function (err, result) {
         if (err) throw err
+
         if (result.length > 0) {
             // if user already exists
             console.log("user already exists")
@@ -100,6 +151,7 @@ function addUser(username, password) {
             }
             // disconnect from database and write web response
             disconnectSQL()
+
         } else {
             // if user does not exist
             console.log("user doesn't exist")
@@ -109,7 +161,7 @@ function addUser(username, password) {
             }
 
             console.log("adding user in the database")
-            sql.query(`INSERT INTO notes (username, password, isAdmin) VALUES ( ? , ? , ? )`, [username, password, false], function (err, result) {
+            sql.query(`INSERT INTO notes (username, password, isAdmin) VALUES ( ? , ? , ? )`, [username, password, settings.createUsersAsAdmin], function (err, result) {
                 if (err) throw err
                 console.log("user added to database")
 
@@ -144,7 +196,6 @@ function addNote(username, password, noteHead) {
     findUser(username, password, function (user) {
         fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
             if (err) throw err
-            console.log("Note read")
             data = JSON.parse(data)
 
             // delete unnecessary values
@@ -483,4 +534,4 @@ let responseMessage
 let fs
 let req
 let body
-
+let settings
