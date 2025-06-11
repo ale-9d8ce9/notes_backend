@@ -60,6 +60,11 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
                 saveNote(body.username, body.password, body.noteId, JSON.parse(body.note))
             }
             break
+        case 'deleteNote':
+            if (body.username && body.password) {
+                deleteNote(body.username, body.password, body.noteId)
+            }
+            break
         case 'ping':
             console.log("ping")
             responseMessage = {
@@ -226,12 +231,21 @@ function addNote(username, password, noteHead) {
                 fs.mkdir(`./notes/data/${user.id}/${noteHead.path}`,{recursive:true}, (err) => {
                     if (err) throw err
                     console.log("note folder created")
-                    responseMessage = {
-                        result: "success",
-                        message: "note added"
-                    }
-                    console.log("note added")
-                    disconnectSQL()
+
+                    fs.writeFile(`./notes/data/${user.id}/${noteHead.path}/elements.json`, JSON.stringify([]), (err) => {
+                        if (err) throw err
+                        console.log("note elements.json created")
+                        fs.writeFile(`./notes/data/${user.id}/${noteHead.path}/fileHeaders.json`, JSON.stringify([]), (err) => {
+                            if (err) throw err
+                            console.log("note fileHeaders.json created")
+                            responseMessage = {
+                                result: "success",
+                                message: "note added"
+                            }
+                            console.log("note added")
+                            disconnectSQL()
+                        })
+                    })
                 })
             })
         })
@@ -267,29 +281,35 @@ function getFullNote(username, password, noteId) {
             fs.readFile(`${path}/elements.json`, 'utf8', (err, data) => {
                 if (err) throw err
                 console.log("note elements read")
-                noteHead.elements = JSON.parse(data)
+            noteHead.elements = JSON.parse(data)
 
-                // read note files
-                noteHead.files = []
-                for (let i = 0; i < noteHead.elements.length; i++) {
-                    let filePath = `${path}/res${i}.bin`
-                    if (fs.existsSync(filePath)) {
-                        let fileData = fs.readFileSync(filePath)
-                        noteHead.files.push({
-                            data: fileData.toString('base64'),
-                        })
-                    } else {
-                        noteHead.files.push(null)
-                    }
-                }
+            fs.readFile(`${path}/fileHeaders.json`, 'utf8', (err, data) => {
+                if (err) throw err
+                console.log("note fileHeaders read")
+            fileHeaders = JSON.parse(data)
 
-                responseMessage = {
-                    result: "success",
-                    message: noteHead
+            // read note files
+            noteHead.files = []
+            for (let i = 0; i < noteHead.elements.length; i++) {
+                let filePath = `${path}/res${i}.bin`
+                if (fs.existsSync(filePath)) {
+                    let fileData = fs.readFileSync(filePath)
+                    noteHead.files.push({
+                        data: fileHeaders[i] + fileData.toString('base64'),
+                    })
+                } else {
+                    noteHead.files.push(null)
                 }
-                // disconnect from database and write web response
-                disconnectSQL()
-            })
+            }
+
+            responseMessage = {
+                result: "success",
+                message: noteHead
+            }
+            // disconnect from database and write web response
+            disconnectSQL()
+        })
+        })
         })
     })
 }
@@ -302,6 +322,11 @@ function saveNote(username, password, noteId, note) {
             path = `./notes/data/${user.id}/${noteHead.path}`
             console.log("note path: " + path)
 
+            fs.readFile(`${path}/fileHeaders.json`, 'utf8', (err, data) => {
+                if (err) throw err
+                console.log("note fileHeaders read")
+                fileHeaders = JSON.parse(data)
+            
             // for all files
             for (let i = 0; i < note.files.length; i++) {
                 let noteFile = note.files[i]
@@ -312,6 +337,7 @@ function saveNote(username, password, noteId, note) {
                     file = decodeFile(noteFile.data)
                     file.name = `res${i}.bin`
                     //save file
+                    fileHeaders[i] = file.header
                     fs.writeFile(`${path}/${file.name}`, file.data, (err) => {
                         if (err) throw err
                         console.log(`note file ${file.name} updated`)
@@ -334,6 +360,7 @@ function saveNote(username, password, noteId, note) {
                 for (let i = filesToDelete.length - 1; i >= 0; i--) {
                     const j = filesToDelete[i]
                     note.elements.splice(j, 1)
+                    fileHeaders.splice(j, 1)
                     fs.unlinkSync(`${path}/res${j}.bin`)
                 }
                 // get how many files were deleted before each file
@@ -371,6 +398,10 @@ function saveNote(username, password, noteId, note) {
                 if (err) throw err
                 console.log("note elements.json updated")
             
+            fs.writeFile(`${path}/fileHeaders.json`, JSON.stringify(fileHeaders), (err) => {
+                if (err) throw err
+                console.log("note fileHeaders.json updated")
+
             // update note head
             noteHead.dateModified = note.dateModified
             noteHead.name = note.name
@@ -383,10 +414,46 @@ function saveNote(username, password, noteId, note) {
                 disconnectSQL()
             })
             })
+            })
+            })
         })
     })
 }
 
+
+function deleteNote(username, password, noteId) {
+    findUser(username, password, function (user) {
+        getNoteHead(user, noteId, function (noteHead) {
+            path = `./notes/data/${user.id}/${noteHead.path}`
+            console.log("note path: " + path)
+
+            // delete note folder
+            fs.rm(path, { recursive: true }, (err) => {
+                if (err) throw err
+                console.log("note folder deleted")
+
+                // delete note head
+                fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+                    if (err) throw err
+                    console.log("user file read")
+                    data = JSON.parse(data)
+                    data.listNotes.splice(noteId, 1)
+                    fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify(data), (err) => {
+                        if (err) throw err
+                        console.log("note head deleted")
+                        responseMessage = {
+                            result: "success",
+                            message: "note deleted"
+                        }
+                        // disconnect from database and write web response
+                        disconnectSQL()
+                    })
+                })
+            })
+        })
+    })
+    console.log("deleting note: " + noteId)
+}
 
 
 function findUser(username, password, callback) {
@@ -487,11 +554,12 @@ function encrypt(i) {
 
 function decodeFile(base64) {
     let fileName = base64.split(',')[0].split(':')[1].split(';')[0]
+    let fileHeader = base64.split(',')[0] + ','
     let type = fileName.split('/')[0]
     let extension = fileName.split('/')[1]
     let base64data = base64.split(',')[1]
     const fileData = Buffer.from(base64data, 'base64')
-    return {data:fileData, type:type, extension:extension}
+    return {data:fileData, type:type, extension:extension, header:fileHeader}
 }
 
 
