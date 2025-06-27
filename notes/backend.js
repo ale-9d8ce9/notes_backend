@@ -11,7 +11,7 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
 
     responseMessage = {
         result: "error",
-        message: "Unknown error"
+        message: "unknown error"
     }
 
     console.log("query: " + JSON.stringify(query))
@@ -194,7 +194,7 @@ function addUserToDatabase(username, password) {
                             console.log("user added")
                             responseMessage = {
                                 result: "success",
-                                message: "User added"
+                                message: "user added"
                             }
                             // disconnect from database and write web response
                             disconnectSQL()
@@ -240,7 +240,7 @@ function addNote(username, password, noteHead) {
                             console.log("note fileHeaders.json created")
                             responseMessage = {
                                 result: "success",
-                                message: "note added"
+                                message: "uote added"
                             }
                             console.log("note added")
                             disconnectSQL()
@@ -404,11 +404,12 @@ function saveNote(username, password, noteId, note) {
 
             // update note head
             noteHead.dateModified = note.dateModified
+            noteHead.position = note.position
             noteHead.name = note.name
             updateNoteHead(user, noteId, noteHead, function () {
                 responseMessage = {
                     result: "success",
-                    message: "note updated"
+                    message: "uote updated"
                 }
                 // disconnect from database and write web response
                 disconnectSQL()
@@ -443,7 +444,7 @@ function deleteNote(username, password, noteId) {
                         console.log("note head deleted")
                         responseMessage = {
                             result: "success",
-                            message: "note deleted"
+                            message: "uote deleted"
                         }
                         // disconnect from database and write web response
                         disconnectSQL()
@@ -468,7 +469,7 @@ function findUser(username, password, callback) {
             console.log("User does not exist")
             responseMessage = {
                 result: "error",
-                message: "User does not exist"
+                message: "user does not exist"
             }
             disconnectSQL()
             return null
@@ -489,7 +490,7 @@ function getNoteHead(user, noteId, callback) {
             console.log("Note does not exist")
             responseMessage = {
                 result: "error",
-                message: "Note does not exist"
+                message: "note does not exist"
             }
             // disconnect from database and write web response
             disconnectSQL()
@@ -523,7 +524,7 @@ function updateNoteHead(user, noteId, noteHead, callback) {
             console.log("Note does not exist")
             responseMessage = {
                 result: "error",
-                message: "Note does not exist"
+                message: "note does not exist"
             }
             // disconnect from database and write web response
             disconnectSQL()
