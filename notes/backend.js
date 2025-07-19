@@ -240,7 +240,7 @@ function addNote(username, password, noteHead) {
                             console.log("note fileHeaders.json created")
                             responseMessage = {
                                 result: "success",
-                                message: "uote added"
+                                message: "note added"
                             }
                             console.log("note added")
                             disconnectSQL()
@@ -409,7 +409,7 @@ function saveNote(username, password, noteId, note) {
             updateNoteHead(user, noteId, noteHead, function () {
                 responseMessage = {
                     result: "success",
-                    message: "uote updated"
+                    message: "note updated"
                 }
                 // disconnect from database and write web response
                 disconnectSQL()
@@ -444,7 +444,7 @@ function deleteNote(username, password, noteId) {
                         console.log("note head deleted")
                         responseMessage = {
                             result: "success",
-                            message: "uote deleted"
+                            message: "note deleted"
                         }
                         // disconnect from database and write web response
                         disconnectSQL()
