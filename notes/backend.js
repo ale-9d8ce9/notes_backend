@@ -7,6 +7,7 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
     mysql = mysql
     query = q
     fs = require('fs')
+    secure = require('./secure')
     settings = JSON.parse(fs.readFileSync('./notes/config.json', 'utf8'))
 
     responseMessage = {
@@ -26,7 +27,7 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
         if (err) throw err
         console.log("connected!")
     
-    sql.query("CREATE TABLE IF NOT EXISTS notes (id INT AUTO_INCREMENT PRIMARY KEY, username TEXT, password TEXT, isAdmin BOOLEAN)", function (err, result) {
+    sql.query("CREATE TABLE IF NOT EXISTS notes (id INT AUTO_INCREMENT PRIMARY KEY, username TEXT, salt TEXT, passwordHash TEXT, isAdmin BOOLEAN)", function (err, result) {
         if (err) throw err
         console.log("Table ok")
 
@@ -86,7 +87,7 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
 function addUserChecks(username, password) {
     console.log("adding user: " + username)
     // checks
-    if (settings.allowUserCreation) {
+    if (settings.allowAccountCreation) {
         if (!username || !password) {
             responseMessage = {
                 result: "error",
@@ -105,8 +106,8 @@ function addUserChecks(username, password) {
                     // if the number of users is less than or equal to the maximum number of users
                     let validUser = true
                     // check if username and password are valid
-                    if (username.length < 5 || password.length < 6) {
-                        //validUser = false
+                    if (username.length < 3 || password.length < 6) {
+                        validUser = false
                         responseMessage = {
                             result: "error",
                             message: "username or password too short"
@@ -176,7 +177,8 @@ function addUserToDatabase(username, password) {
             }
 
             console.log("adding user in the database")
-            sql.query(`INSERT INTO notes (username, password, isAdmin) VALUES ( ? , ? , ? )`, [username, password, settings.createUsersAsAdmin], function (err, result) {
+            let hash = secure.hashPassword(password)
+            sql.query(`INSERT INTO notes (username, salt, passwordHash, isAdmin) VALUES ( ? , ? , ? )`, [username, hash.salt, hash.hash, settings.createUsersAsAdmin], function (err, result) {
                 if (err) throw err
                 console.log("user added to database")
 
@@ -458,12 +460,22 @@ function deleteNote(username, password, noteId) {
 
 
 function findUser(username, password, callback) {
-    sql.query(`SELECT * FROM notes WHERE username = ? AND password = ?`, [username, password], function (err, result) {
+    sql.query(`SELECT * FROM notes WHERE username = ?`, [username], function (err, result) {
         if (err) throw err
         // check if user exists
         if (result.length == 1) {
             console.log("User exists")
-            callback(result[0])
+            if (secure.verifyHash(password, result[0].salt, result[0].passwordHash)) {
+                callback(result[0])
+            } else {
+                console.log("Invalid password")
+                responseMessage = {
+                    result: "error",
+                    message: "Invalid password"
+                }
+                disconnectSQL()
+                return null
+            }
         } else {
             // if user does not exist
             console.log("User does not exist")
