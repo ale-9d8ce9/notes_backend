@@ -1,11 +1,7 @@
 var http = require('http')
 var url = require('url')
-var mysql = require('mysql2')
-
-// Load environment variables from ".env" file
-var dotenv = require('./dotenv').dotenv
-
-// Load the notes module and its configuration
+var sql = require('sqlite3')
+sql.verbose()
 var notes = require('./notes/backend')
 
 http.createServer((req, res) => {
@@ -22,7 +18,10 @@ http.createServer((req, res) => {
                     res.end()
                     break
                 case '/notes':
-                    notes.run(req, res, body, dotenv, mysql, u.query)
+                    const db = new sql.Database('notes/notes.db', (err) => {
+                        if (err) throw err
+                        notes.run(req, res, body, db, u.query)
+                    })
                     break
             
                 default:

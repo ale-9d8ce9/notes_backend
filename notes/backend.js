@@ -1,14 +1,13 @@
 
-exports.run = function (request, response, b, dotenv, mysql, q, set) {
+exports.run = function (request, response, b, sqlitedb, q) {
     req = request
     res = response
     body = JSON.parse(b)
-    dotenv = dotenv
-    mysql = mysql
     query = q
     fs = require('fs')
     secure = require('./secure')
     settings = JSON.parse(fs.readFileSync('./notes/config.json', 'utf8'))
+    db = sqlitedb
 
     responseMessage = {
         result: "error",
@@ -17,17 +16,7 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
 
     console.log("query: " + JSON.stringify(query))
 
-    sql = mysql.createConnection({
-        host: "localhost",
-        user: dotenv.user,
-        password: dotenv.password,
-        database: 'notes'
-    })
-    sql.connect(function(err) {
-        if (err) throw err
-        console.log("connected!")
-    
-    sql.query("CREATE TABLE IF NOT EXISTS notes (id INT AUTO_INCREMENT PRIMARY KEY, username TEXT, salt TEXT, passwordHash TEXT, isAdmin BOOLEAN)", function (err, result) {
+    db.exec("CREATE TABLE IF NOT EXISTS notes (username TEXT, salt TEXT, passwordHash TEXT, isAdmin BOOLEAN)", function (err) {
         if (err) throw err
         console.log("Table ok")
 
@@ -80,7 +69,6 @@ exports.run = function (request, response, b, dotenv, mysql, q, set) {
             break
     }
     })
-    })
 }
 
 
@@ -98,7 +86,7 @@ function addUserChecks(username, password) {
             disconnectSQL()
 
         } else {
-            sql.query('SELECT * FROM notes', [], function (err, result) {
+            db.all('SELECT * FROM notes', [], function (err, result) {
                 if (err) throw err
 
                 if (result.length < settings.maxUsers) {
@@ -155,7 +143,7 @@ function addUserChecks(username, password) {
 
 function addUserToDatabase(username, password) {
     // start adding user to database
-    sql.query(`SELECT * FROM notes WHERE username = ?`,[username], function (err, result) {
+    db.all(`SELECT * FROM notes WHERE username = ?`,[username], function (err, result) {
         if (err) throw err
 
         if (result.length > 0) {
@@ -177,19 +165,20 @@ function addUserToDatabase(username, password) {
             }
 
             console.log("adding user in the database")
-            let hash = secure.hashPassword(password)
-            sql.query(`INSERT INTO notes (username, salt, passwordHash, isAdmin) VALUES ( ? , ? , ? )`, [username, hash.salt, hash.hash, settings.createUsersAsAdmin], function (err, result) {
+            let hash = JSON.parse(secure.hashPassword(password))
+            console.log(hash)
+            db.run(`INSERT INTO notes (username, salt, passwordHash, isAdmin) VALUES ( ? , ? , ? , ? )`, [username, hash.salt, hash.hash, settings.createUsersAsAdmin], function (err) {
                 if (err) throw err
                 console.log("user added to database")
 
                 console.log("creating user folder")
                 findUser(username, password, function (user) {
-                    fs.mkdir(`./notes/data/${user.id}`,{recursive:true}, (err) => {
+                    fs.mkdir(`./notes/data/${user.username}`,{recursive:true}, (err) => {
                         if (err) throw err
                         console.log("user folder created")
 
                         console.log("creating user file")
-                        fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify({listNotes: []}), (err) => {
+                        fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify({listNotes: []}), (err) => {
                             if (err) throw err
                             console.log("user file created")
 
@@ -211,7 +200,7 @@ function addUserToDatabase(username, password) {
 
 function addNote(username, password, noteHead) {
     findUser(username, password, function (user) {
-        fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+        fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
             if (err) throw err
             data = JSON.parse(data)
 
@@ -226,18 +215,18 @@ function addNote(username, password, noteHead) {
             ].join("/").replace("Z", "")
 
             data.listNotes.push(noteHead)
-            fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify(data), (err) => {
+            fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify(data), (err) => {
                 if (err) throw err
 
                 console.log("creating note folder")
-                fs.mkdir(`./notes/data/${user.id}/${noteHead.path}`,{recursive:true}, (err) => {
+                fs.mkdir(`./notes/data/${user.username}/${noteHead.path}`,{recursive:true}, (err) => {
                     if (err) throw err
                     console.log("note folder created")
 
-                    fs.writeFile(`./notes/data/${user.id}/${noteHead.path}/elements.json`, JSON.stringify([]), (err) => {
+                    fs.writeFile(`./notes/data/${user.username}/${noteHead.path}/elements.json`, JSON.stringify([]), (err) => {
                         if (err) throw err
                         console.log("note elements.json created")
-                        fs.writeFile(`./notes/data/${user.id}/${noteHead.path}/fileHeaders.json`, JSON.stringify([]), (err) => {
+                        fs.writeFile(`./notes/data/${user.username}/${noteHead.path}/fileHeaders.json`, JSON.stringify([]), (err) => {
                             if (err) throw err
                             console.log("note fileHeaders.json created")
                             responseMessage = {
@@ -257,7 +246,7 @@ function addNote(username, password, noteHead) {
 
 function getListNotes(username, password) {
     findUser(username, password, function (user) {
-        fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+        fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
             if (err) throw err
 
             console.log("user file read")
@@ -276,7 +265,7 @@ function getListNotes(username, password) {
 function getFullNote(username, password, noteId) {
     findUser(username, password, function (user) {
         getNoteHead(user, noteId, function (noteHead) {
-            path = `./notes/data/${user.id}/${noteHead.path}`
+            path = `./notes/data/${user.username}/${noteHead.path}`
             console.log("note path: " + path)
 
             // read note text elements and index
@@ -294,7 +283,8 @@ function getFullNote(username, password, noteId) {
             noteHead.files = []
             for (let i = 0; i < noteHead.elements.length; i++) {
                 let filePath = `${path}/res${i}.bin`
-                if (fs.existsSync(filePath)) {
+                if (fileHeaders[i] != null) {
+                    console.log("serving file: " + i + ", " + filePath)
                     let fileData = fs.readFileSync(filePath)
                     noteHead.files.push({
                         data: fileHeaders[i] + fileData.toString('base64'),
@@ -321,7 +311,7 @@ function saveNote(username, password, noteId, note) {
     findUser(username, password, function (user) {
         // get note path
         getNoteHead(user, noteId, function (noteHead) {
-            path = `./notes/data/${user.id}/${noteHead.path}`
+            path = `./notes/data/${user.username}/${noteHead.path}`
             console.log("note path: " + path)
 
             fs.readFile(`${path}/fileHeaders.json`, 'utf8', (err, data) => {
@@ -329,71 +319,65 @@ function saveNote(username, password, noteId, note) {
                 console.log("note fileHeaders read")
                 fileHeaders = JSON.parse(data)
             
-            // for all files
-            for (let i = 0; i < note.files.length; i++) {
-                let noteFile = note.files[i]
-                // if file exists and is not deleted
-                if (noteFile != null && noteFile.deleted == false) {
-                    console.log(`note file ${i} exists`)
-                    // decode file
-                    file = decodeFile(noteFile.data)
-                    file.name = `res${i}.bin`
-                    //save file
-                    fileHeaders[i] = file.header
-                    fs.writeFile(`${path}/${file.name}`, file.data, (err) => {
-                        if (err) throw err
-                        console.log(`note file ${file.name} updated`)
-                    })
-                    delete noteFile.data
-                }
-            }
 
             // check for deleted files
-            let filesToDelete = []
-            for (let i = 0; i < note.files.length; i++) {
-                if (note.files[i] != null && note.files[i].deleted) {
-                    filesToDelete.push(i)
-                }
-            }
+            let filesToDelete = note.filesToDelete
+            console.log("files to delete: " + filesToDelete)
             // if there are files to delete
             if (filesToDelete.length > 0) {
-                console.log("deleting files: " + filesToDelete)
-                // delete files
-                for (let i = filesToDelete.length - 1; i >= 0; i--) {
-                    const j = filesToDelete[i]
-                    note.elements.splice(j, 1)
-                    fileHeaders.splice(j, 1)
-                    fs.unlinkSync(`${path}/res${j}.bin`)
-                }
-                // get how many files were deleted before each file
-                let fileNameChange = []
-                for (let i = 0; i < note.files.length; i++) {
-                    fileNameChange[i] = 0
-                    for (let j = 0; j < filesToDelete.length; j++) {
-                        if (filesToDelete[j] <= i) {
-                            fileNameChange[i]++
-                        }
-                    }
-                }
-                // rename res files
-                j = 0
-                for (let i = filesToDelete[0]; i < note.files.length; i++) {
-                    // if file is deleted, skip it
-                    if (i == filesToDelete[j]) {
-                        j++
-                    } else {
-                        let oldName = `${path}/res${i}.bin`
-                        let newName = `${path}/res${i - fileNameChange[i]}.bin`
+                // for all files to delete
+                for (let i = 0; i < filesToDelete.length; i++) {
+                    const element = filesToDelete[i];
+                    //delete file res${filesToDelete[i]}.bin if exists (has a header)
+                    if (fileHeaders[element] != null) {
                         try {
-                            fs.renameSync(oldName, newName)
-                            console.log(`note file ${oldName} renamed to ${newName}`)
+                            fs.unlinkSync(`${path}/res${element}.bin`)
+                            console.log(`deleted file res${element}.bin`)
                         } catch (error) {
-                            console.error(`Error renaming file ${oldName} to ${newName}:\n`, error);
+                            console.error(`Error deleting file ${path}/res${element}.bin:\n`, error)
                         }
+                    } else {console.log(`file res${element}.bin should not exist (for deletion)`)}
+                    console.log('fileHeaders before deletion: ',fileHeaders)
+                    fileHeaders.splice(element, 1)
+                    console.log('fileHeaders after deletion: ',fileHeaders)
+                    // rename all files decreasing the number after the one that has been deleted
+                    for (let j = element; j < fileHeaders.length; j++) {
+                        if (fileHeaders[j] != null) {
+                            try {
+                                fs.renameSync(`${path}/res${j + 1}.bin`, `${path}/res${j}.bin`)
+                                console.log(`renamed file ${path}/res${j + 1}.bin to ${path}/res${j}.bin`)
+                            } catch (error) {
+                                console.error(`Error renaming file ${path}/res${j + 1}.bin to ${path}/res${j}.bin:\n`, error)
+                            }
+                        } else {console.log(`file res${j + 1}.bin should not exist (for renaming)`)}
                     }
                 }
             } else console.log("no files to delete")
             delete filesToDelete
+
+            // for all files
+            for (let i = 0; i < note.files.length; i++) {
+                let noteFile = note.files[i]
+                // if file exists and is updated
+                if (note.elements[i].toUpload == true) {
+                    if (noteFile != null) {
+                        console.log(`note file ${i} needs to change / be created`)
+                        // decode file
+                        file = decodeFile(noteFile.data)
+                        file.name = `res${i}.bin`
+                        //save file
+                        fs.writeFile(`${path}/${file.name}`, file.data, (err, i) => {
+                            if (err) throw err
+                            console.log(`note file updated`)
+                        })
+                        fileHeaders[i] = file.header
+                        delete noteFile.data
+                    } else {
+                        fileHeaders[i] = null
+                    }
+                }
+            }
+
 
             // update note text elements and index
             fs.writeFile(`${path}/elements.json`, JSON.stringify(note.elements), (err) => {
@@ -427,7 +411,7 @@ function saveNote(username, password, noteId, note) {
 function deleteNote(username, password, noteId) {
     findUser(username, password, function (user) {
         getNoteHead(user, noteId, function (noteHead) {
-            path = `./notes/data/${user.id}/${noteHead.path}`
+            path = `./notes/data/${user.username}/${noteHead.path}`
             console.log("note path: " + path)
 
             // delete note folder
@@ -436,12 +420,12 @@ function deleteNote(username, password, noteId) {
                 console.log("note folder deleted")
 
                 // delete note head
-                fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+                fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
                     if (err) throw err
                     console.log("user file read")
                     data = JSON.parse(data)
                     data.listNotes.splice(noteId, 1)
-                    fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify(data), (err) => {
+                    fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify(data), (err) => {
                         if (err) throw err
                         console.log("note head deleted")
                         responseMessage = {
@@ -460,7 +444,7 @@ function deleteNote(username, password, noteId) {
 
 
 function findUser(username, password, callback) {
-    sql.query(`SELECT * FROM notes WHERE username = ?`, [username], function (err, result) {
+    db.all(`SELECT * FROM notes WHERE username = ?`, [username], function (err, result) {
         if (err) throw err
         // check if user exists
         if (result.length == 1) {
@@ -491,7 +475,7 @@ function findUser(username, password, callback) {
 
 
 function getNoteHead(user, noteId, callback) {
-    fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+    fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
         if (err) throw err
         console.log("user file read")
 
@@ -512,7 +496,7 @@ function getNoteHead(user, noteId, callback) {
 
 
 function updateNoteHead(user, noteId, noteHead, callback) {
-    fs.readFile(`./notes/data/${user.id}/user.json`, 'utf8', (err, data) => {
+    fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
         if (err) throw err
         console.log("user file read")
 
@@ -522,7 +506,7 @@ function updateNoteHead(user, noteId, noteHead, callback) {
 
             // overwrite note head
             data.listNotes[noteId] = noteHead
-            fs.writeFile(`./notes/data/${user.id}/user.json`, JSON.stringify(data), (err) => {
+            fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify(data), (err) => {
                 if (err) throw err
 
                 console.log("note head updated")
@@ -547,7 +531,7 @@ function updateNoteHead(user, noteId, noteHead, callback) {
 
 
 function logDatabase(callback) {
-    sql.query("SELECT * FROM notes", function (err, result, fields) {
+    db.all("SELECT * FROM notes", function (err, result) {
         if (err) throw err
         console.log(result)
         callback ? callback() : writeResponse()
@@ -605,7 +589,7 @@ function writeResponse(refuse) {
 
 
 function disconnectSQL() {
-    sql.end(function(err) {
+    db.close(function(err) {
         if (err) throw err
         console.log("disconnected")
         writeResponse()
@@ -616,7 +600,6 @@ function disconnectSQL() {
 
 
 
-let sql
 let query
 let res
 let responseMessage
@@ -624,3 +607,4 @@ let fs
 let req
 let body
 let settings
+let db
