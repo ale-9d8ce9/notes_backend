@@ -1,5 +1,6 @@
 {
   "maxUsers": 100,
   "createUsersAsAdmin": false,
-  "allowAccountCreation": true
+  "allowAccountCreation": true,
+  "useEncryption": true
 }

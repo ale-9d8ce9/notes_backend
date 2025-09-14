@@ -1,58 +1,90 @@
+const { disconnect } = require('process')
 
 exports.run = function (request, response, b, sqlitedb, q) {
     req = request
     res = response
-    body = JSON.parse(b)
     query = q
     fs = require('fs')
     secure = require('./secure')
+    script = require('./scripts')
     settings = JSON.parse(fs.readFileSync('./notes/config.json', 'utf8'))
     db = sqlitedb
+    body = JSON.parse(b)
 
     responseMessage = {
         result: "error",
         message: "unknown error"
     }
 
-    console.log("query: " + JSON.stringify(query))
-
-    db.exec("CREATE TABLE IF NOT EXISTS notes (username TEXT, salt TEXT, passwordHash TEXT, isAdmin BOOLEAN)", function (err) {
+    db.exec("CREATE TABLE IF NOT EXISTS notes (username TEXT, salt TEXT, passwordHash TEXT, isAdmin BOOLEAN)", async function (err) {
         if (err) throw err
         console.log("Table ok")
 
+    if (settings.useEncryption) {
+        if (fs.existsSync('./notes/AES_GCM.key')) {
+            try {
+                // import key
+                const keyData = fs.readFileSync('./notes/AES_GCM.key', 'utf8')
+                AES_GCM_key = await secure.importKey(new Uint8Array(keyData.split(',')))
+                // decrypt body
+                body = await secure.decrypt(AES_GCM_key, body)
+                body = JSON.parse(body)
+                console.log("decrypted request")
+            } catch (e) {
+                throw new Error("Error decrypting request body:", e)
+            }
+        } else {
+            AES_GCM_key = await secure.AES_GCM.getKey()
+            console.log(await secure.exportKey(AES_GCM_key))
+            fs.writeFileSync('./notes/AES_GCM.key', (await secure.exportKey(AES_GCM_key)).toString())
+            throw new Error("AES-GCM key not found, generated new key")
+        }
+    }
     body.username ? body.username = body.username.trim() : undefined
     body.password ? body.password = body.password.trim() : undefined
 
-    console.log("\naction: " + query.action)
+    console.log("action: " + query.action)
     switch (query.action) {
         case 'addUser':
             if (body.username && body.password) {
                 addUserChecks(body.username, body.password)
+            } else {
+                writeResponse(true)
             }
             break
         case 'addNote':
             if (body.username && body.password) {
                 addNote(body.username, body.password, JSON.parse(body.note))
+            } else {
+                writeResponse(true)
             }
             break
         case 'getListNotes':
             if (body.username && body.password) {
                 getListNotes(body.username, body.password)
+            } else {
+                writeResponse(true)
             }
             break
         case 'getFullNote':
             if (body.username && body.password) {
                 getFullNote(body.username, body.password, body.noteId)
+            } else {
+                writeResponse(true)
             }
             break
         case 'saveNote':
             if (body.username && body.password) {
                 saveNote(body.username, body.password, body.noteId, JSON.parse(body.note))
+            } else {
+                writeResponse(true)
             }
             break
         case 'deleteNote':
             if (body.username && body.password) {
                 deleteNote(body.username, body.password, body.noteId)
+            } else {
+                writeResponse(true)
             }
             break
         case 'ping':
@@ -61,11 +93,11 @@ exports.run = function (request, response, b, sqlitedb, q) {
                 result: "success",
                 message: "pong"
             }
-            disconnectSQL()
+            writeResponse()
             break
         default:
             console.log("No action specified")
-            disconnectSQL()
+            writeResponse()
             break
     }
     })
@@ -83,7 +115,7 @@ function addUserChecks(username, password) {
             }
             console.log("username or password not specified")
             // disconnect from database and write web response
-            disconnectSQL()
+            writeResponse()
 
         } else {
             db.all('SELECT * FROM notes', [], function (err, result) {
@@ -111,7 +143,7 @@ function addUserChecks(username, password) {
                     if (!validUser) {
                         console.log("invalid user")
                         // disconnect from database and write web response
-                        disconnectSQL()
+                        writeResponse()
                     } else {
                         console.log("can add user")
                         addUserToDatabase(username, password)
@@ -124,7 +156,7 @@ function addUserChecks(username, password) {
                         message: "max number of users reached for this server"
                     }
                     // disconnect from database and write web response
-                    disconnectSQL()
+                    writeResponse()
                 }
             })
         }
@@ -135,7 +167,7 @@ function addUserChecks(username, password) {
             message: "user creation is not allowed"
         }
         // disconnect from database and write web response
-        disconnectSQL()
+        writeResponse()
     }
 }
 
@@ -154,7 +186,7 @@ function addUserToDatabase(username, password) {
                 message: "user already exists"
             }
             // disconnect from database and write web response
-            disconnectSQL()
+            writeResponse()
 
         } else {
             // if user does not exist
@@ -188,7 +220,7 @@ function addUserToDatabase(username, password) {
                                 message: "user added"
                             }
                             // disconnect from database and write web response
-                            disconnectSQL()
+                            writeResponse()
                         })
                     })
                 })
@@ -234,7 +266,7 @@ function addNote(username, password, noteHead) {
                                 message: "note added"
                             }
                             console.log("note added")
-                            disconnectSQL()
+                            writeResponse()
                         })
                     })
                 })
@@ -256,7 +288,7 @@ function getListNotes(username, password) {
                 message: data.listNotes
             }
             // disconnect from database and write web response
-            disconnectSQL()
+            writeResponse()
         })
     })
 }
@@ -284,7 +316,7 @@ function getFullNote(username, password, noteId) {
             for (let i = 0; i < noteHead.elements.length; i++) {
                 let filePath = `${path}/res${i}.bin`
                 if (fileHeaders[i] != null) {
-                    console.log("serving file: " + i + ", " + filePath)
+                    console.log("appending file: " + i + ", " + filePath)
                     let fileData = fs.readFileSync(filePath)
                     noteHead.files.push({
                         data: fileHeaders[i] + fileData.toString('base64'),
@@ -299,7 +331,7 @@ function getFullNote(username, password, noteId) {
                 message: noteHead
             }
             // disconnect from database and write web response
-            disconnectSQL()
+            writeResponse()
         })
         })
         })
@@ -337,9 +369,7 @@ function saveNote(username, password, noteId, note) {
                             console.error(`Error deleting file ${path}/res${element}.bin:\n`, error)
                         }
                     } else {console.log(`file res${element}.bin should not exist (for deletion)`)}
-                    console.log('fileHeaders before deletion: ',fileHeaders)
                     fileHeaders.splice(element, 1)
-                    console.log('fileHeaders after deletion: ',fileHeaders)
                     // rename all files decreasing the number after the one that has been deleted
                     for (let j = element; j < fileHeaders.length; j++) {
                         if (fileHeaders[j] != null) {
@@ -398,7 +428,7 @@ function saveNote(username, password, noteId, note) {
                     message: "note updated"
                 }
                 // disconnect from database and write web response
-                disconnectSQL()
+                writeResponse()
             })
             })
             })
@@ -433,7 +463,7 @@ function deleteNote(username, password, noteId) {
                             message: "note deleted"
                         }
                         // disconnect from database and write web response
-                        disconnectSQL()
+                        writeResponse()
                     })
                 })
             })
@@ -457,7 +487,7 @@ function findUser(username, password, callback) {
                     result: "error",
                     message: "Invalid password"
                 }
-                disconnectSQL()
+                writeResponse()
                 return null
             }
         } else {
@@ -467,7 +497,7 @@ function findUser(username, password, callback) {
                 result: "error",
                 message: "user does not exist"
             }
-            disconnectSQL()
+            writeResponse()
             return null
         }
     })
@@ -489,7 +519,7 @@ function getNoteHead(user, noteId, callback) {
                 message: "note does not exist"
             }
             // disconnect from database and write web response
-            disconnectSQL()
+            writeResponse()
         }
     })
 }
@@ -523,7 +553,7 @@ function updateNoteHead(user, noteId, noteHead, callback) {
                 message: "note does not exist"
             }
             // disconnect from database and write web response
-            disconnectSQL()
+            writeResponse()
         }
     })
     
@@ -540,14 +570,6 @@ function logDatabase(callback) {
 
 
 
-function decrypt(i) {
-    return atob(i)
-}
-
-function encrypt(i) {
-    return btoa(i)
-}
-
 
 function decodeFile(base64) {
     let fileName = base64.split(',')[0].split(':')[1].split(';')[0]
@@ -563,7 +585,7 @@ function decodeFile(base64) {
 
 
 
-function writeResponse(refuse) {
+async function writeResponse(refuse) {
     // Set CORS headers to allow requests from any origin
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -579,11 +601,16 @@ function writeResponse(refuse) {
         res.write(JSON.stringify(responseMessage))
         console.log("refusing request")
     } else {
+        if (settings.useEncryption) {
+            responseMessage = await secure.encrypt(AES_GCM_key, JSON.stringify(responseMessage))
+            console.log("encrypted response")
+        }
         res.writeHead(200)
         res.write(JSON.stringify(responseMessage))
     }
     res.end()
-    console.log("request done")
+    console.log("disconnecting")
+    disconnectSQL()
 }
 
 
@@ -591,8 +618,7 @@ function writeResponse(refuse) {
 function disconnectSQL() {
     db.close(function(err) {
         if (err) throw err
-        console.log("disconnected")
-        writeResponse()
+        console.log("done")
     })
 }
 
@@ -608,3 +634,7 @@ let req
 let body
 let settings
 let db
+
+let secure
+let script
+let AES_GCM_key
