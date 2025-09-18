@@ -31,7 +31,9 @@ exports.run = function (request, response, b, sqlitedb, q) {
                 body = JSON.parse(body)
                 console.log("decrypted request")
             } catch (e) {
-                throw new Error("Error decrypting request body:", e)
+                console.error("Error decrypting request body:", e)
+                writeResponse(true)
+                return
             }
         } else {
             AES_GCM_key = await secure.AES_GCM.getKey()
@@ -122,7 +124,7 @@ function addUserChecks(username, password) {
                 if (err) throw err
 
                 if (result.length < settings.maxUsers) {
-                    delete result
+                    result = undefined
                     // if the number of users is less than or equal to the maximum number of users
                     let validUser = true
                     // check if username and password are valid
@@ -383,7 +385,7 @@ function saveNote(username, password, noteId, note) {
                     }
                 }
             } else console.log("no files to delete")
-            delete filesToDelete
+            filesToDelete = undefined
 
             // for all files
             for (let i = 0; i < note.files.length; i++) {
