@@ -18,16 +18,22 @@ http.createServer((req, res) => {
                     res.end()
                     break
                 case '/notes':
-                    const db = new sql.Database('notes/notes.db', (err) => {
-                        if (err) throw err
-                        notes.run(req, res, body, db, u.query)
-                    })
+                    try {
+                        const db = new sql.Database('notes/notes.db', (err) => {
+                            if (err) throw err
+                            notes.run(req, res, body, db, u.query)
+                        })
+                    } catch (e) {
+                        console.error(e)
+                        res.writeHead(500)
+                        res.end()
+                    }
                     break
             
                 default:
+                    res.writeHead(404)
+                    res.end()
                     break
         }
     })
 }).listen(8080)
-
-

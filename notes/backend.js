@@ -1,5 +1,3 @@
-const { disconnect } = require('process')
-
 exports.run = function (request, response, b, sqlitedb, q) {
     req = request
     res = response
