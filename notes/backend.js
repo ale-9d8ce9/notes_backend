@@ -15,7 +15,7 @@ exports.run = function (request, response, b, sqlitedb, q) {
     }
 
     db.exec("CREATE TABLE IF NOT EXISTS notes (username TEXT, salt TEXT, passwordHash TEXT, isAdmin BOOLEAN)", async function (err) {
-        if (err) throw err
+        if (err) {exitWithError(err);return;}
         console.log("Table ok")
 
     if (settings.useEncryption) {
@@ -119,7 +119,7 @@ function addUserChecks(username, password) {
 
         } else {
             db.all('SELECT * FROM notes', [], function (err, result) {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
 
                 if (result.length < settings.maxUsers) {
                     result = undefined
@@ -176,7 +176,7 @@ function addUserChecks(username, password) {
 function addUserToDatabase(username, password) {
     // start adding user to database
     db.all(`SELECT * FROM notes WHERE username = ?`,[username], function (err, result) {
-        if (err) throw err
+        if (err) {exitWithError(err);return;}
 
         if (result.length > 0) {
             // if user already exists
@@ -200,18 +200,18 @@ function addUserToDatabase(username, password) {
             let hash = JSON.parse(secure.hashPassword(password))
             console.log(hash)
             db.run(`INSERT INTO notes (username, salt, passwordHash, isAdmin) VALUES ( ? , ? , ? , ? )`, [username, hash.salt, hash.hash, settings.createUsersAsAdmin], function (err) {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
                 console.log("user added to database")
 
                 console.log("creating user folder")
                 findUser(username, password, function (user) {
                     fs.mkdir(`./notes/data/${user.username}`,{recursive:true}, (err) => {
-                        if (err) throw err
+                        if (err) {exitWithError(err);return;}
                         console.log("user folder created")
 
                         console.log("creating user file")
                         fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify({listNotes: []}), (err) => {
-                            if (err) throw err
+                            if (err) {exitWithError(err);return;}
                             console.log("user file created")
 
                             console.log("user added")
@@ -233,7 +233,7 @@ function addUserToDatabase(username, password) {
 function addNote(username, password, noteHead) {
     findUser(username, password, function (user) {
         fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
-            if (err) throw err
+            if (err) {exitWithError(err);return;}
             data = JSON.parse(data)
 
             // delete unnecessary values
@@ -248,18 +248,18 @@ function addNote(username, password, noteHead) {
 
             data.listNotes.push(noteHead)
             fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify(data), (err) => {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
 
                 console.log("creating note folder")
                 fs.mkdir(`./notes/data/${user.username}/${noteHead.path}`,{recursive:true}, (err) => {
-                    if (err) throw err
+                    if (err) {exitWithError(err);return;}
                     console.log("note folder created")
 
                     fs.writeFile(`./notes/data/${user.username}/${noteHead.path}/elements.json`, JSON.stringify([]), (err) => {
-                        if (err) throw err
+                        if (err) {exitWithError(err);return;}
                         console.log("note elements.json created")
                         fs.writeFile(`./notes/data/${user.username}/${noteHead.path}/fileHeaders.json`, JSON.stringify([]), (err) => {
-                            if (err) throw err
+                            if (err) {exitWithError(err);return;}
                             console.log("note fileHeaders.json created")
                             responseMessage = {
                                 result: "success",
@@ -279,7 +279,7 @@ function addNote(username, password, noteHead) {
 function getListNotes(username, password) {
     findUser(username, password, function (user) {
         fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
-            if (err) throw err
+            if (err) {exitWithError(err);return;}
 
             console.log("user file read")
             data = JSON.parse(data)
@@ -302,12 +302,12 @@ function getFullNote(username, password, noteId) {
 
             // read note text elements and index
             fs.readFile(`${path}/elements.json`, 'utf8', (err, data) => {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
                 console.log("note elements read")
             noteHead.elements = JSON.parse(data)
 
             fs.readFile(`${path}/fileHeaders.json`, 'utf8', (err, data) => {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
                 console.log("note fileHeaders read")
             fileHeaders = JSON.parse(data)
 
@@ -317,7 +317,12 @@ function getFullNote(username, password, noteId) {
                 let filePath = `${path}/res${i}.bin`
                 if (fileHeaders[i] != null) {
                     console.log("appending file: " + i + ", " + filePath)
-                    let fileData = fs.readFileSync(filePath)
+                    let fileData
+                    try {
+                        fileData = fs.readFileSync(filePath)
+                    } catch (err) {
+                        exitWithError(err);return;
+                    }
                     noteHead.files.push({
                         data: fileHeaders[i] + fileData.toString('base64'),
                     })
@@ -347,7 +352,7 @@ function saveNote(username, password, noteId, note) {
             console.log("note path: " + path)
 
             fs.readFile(`${path}/fileHeaders.json`, 'utf8', (err, data) => {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
                 console.log("note fileHeaders read")
                 fileHeaders = JSON.parse(data)
             
@@ -397,7 +402,7 @@ function saveNote(username, password, noteId, note) {
                         file.name = `res${i}.bin`
                         //save file
                         fs.writeFile(`${path}/${file.name}`, file.data, (err, i) => {
-                            if (err) throw err
+                            if (err) {exitWithError(err);return;}
                             console.log(`note file updated`)
                         })
                         fileHeaders[i] = file.header
@@ -411,11 +416,11 @@ function saveNote(username, password, noteId, note) {
 
             // update note text elements and index
             fs.writeFile(`${path}/elements.json`, JSON.stringify(note.elements), (err) => {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
                 console.log("note elements.json updated")
             
             fs.writeFile(`${path}/fileHeaders.json`, JSON.stringify(fileHeaders), (err) => {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
                 console.log("note fileHeaders.json updated")
 
             // update note head
@@ -446,17 +451,17 @@ function deleteNote(username, password, noteId) {
 
             // delete note folder
             fs.rm(path, { recursive: true }, (err) => {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
                 console.log("note folder deleted")
 
                 // delete note head
                 fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
-                    if (err) throw err
+                    if (err) {exitWithError(err);return;}
                     console.log("user file read")
                     data = JSON.parse(data)
                     data.listNotes.splice(noteId, 1)
                     fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify(data), (err) => {
-                        if (err) throw err
+                        if (err) {exitWithError(err);return;}
                         console.log("note head deleted")
                         responseMessage = {
                             result: "success",
@@ -475,7 +480,7 @@ function deleteNote(username, password, noteId) {
 
 function findUser(username, password, callback) {
     db.all(`SELECT * FROM notes WHERE username = ?`, [username], function (err, result) {
-        if (err) throw err
+        if (err) {exitWithError(err);return;}
         // check if user exists
         if (result.length == 1) {
             console.log("User exists")
@@ -506,7 +511,7 @@ function findUser(username, password, callback) {
 
 function getNoteHead(user, noteId, callback) {
     fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
-        if (err) throw err
+        if (err) {exitWithError(err);return;}
         console.log("user file read")
 
         data = JSON.parse(data)
@@ -527,7 +532,7 @@ function getNoteHead(user, noteId, callback) {
 
 function updateNoteHead(user, noteId, noteHead, callback) {
     fs.readFile(`./notes/data/${user.username}/user.json`, 'utf8', (err, data) => {
-        if (err) throw err
+        if (err) {exitWithError(err);return;}
         console.log("user file read")
 
         data = JSON.parse(data)
@@ -537,7 +542,7 @@ function updateNoteHead(user, noteId, noteHead, callback) {
             // overwrite note head
             data.listNotes[noteId] = noteHead
             fs.writeFile(`./notes/data/${user.username}/user.json`, JSON.stringify(data), (err) => {
-                if (err) throw err
+                if (err) {exitWithError(err);return;}
 
                 console.log("note head updated")
                 responseMessage = {
@@ -562,7 +567,7 @@ function updateNoteHead(user, noteId, noteHead, callback) {
 
 function logDatabase(callback) {
     db.all("SELECT * FROM notes", function (err, result) {
-        if (err) throw err
+        if (err) {exitWithError(err);return;}
         console.log(result)
         callback ? callback() : writeResponse()
     })
@@ -582,7 +587,21 @@ function decodeFile(base64) {
 }
 
 
-
+async function exitWithError(err) {
+    console.error("Internal server error:\n", err)
+    if (settings.shareServerErrors) {
+        responseMessage = {
+            result: "error",
+            message: err.toString()
+        }
+    } else {
+        responseMessage = {
+            result: "error",
+            message: "internal server error"
+        }
+    }
+    writeResponse()
+}
 
 
 async function writeResponse(refuse) {
@@ -617,7 +636,7 @@ async function writeResponse(refuse) {
 
 function disconnectSQL() {
     db.close(function(err) {
-        if (err) throw err
+        if (err) {exitWithError(err);return;}
         console.log("done")
     })
 }
@@ -636,5 +655,4 @@ let settings
 let db
 
 let secure
-let script
 let AES_GCM_key

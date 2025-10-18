@@ -11,7 +11,8 @@ http.createServer((req, res) => {
     }).on('end', () => {
         
         var u = url.parse(req.url, true)
-        console.log('\n\nnew request: ' + u.pathname)
+        console.log('\n\n' + new Date().toISOString() + ' - new request: ' + u.pathname)
+        console.log('from ' + (req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0].trim()) // client IP address
             switch (u.pathname) {
                 case '/':
                     res.write('<h1>api server</h1>')
@@ -21,18 +22,24 @@ http.createServer((req, res) => {
                     try {
                         const db = new sql.Database('notes/notes.db', (err) => {
                             if (err) throw err
-                            notes.run(req, res, body, db, u.query)
+                            try {
+                                notes.run(req, res, body, db, u.query)
+                            } catch (e) {
+                                console.error(e)
+                                res.writeHead(500)
+                                res.end('Internal Server Error')
+                            }
                         })
                     } catch (e) {
                         console.error(e)
                         res.writeHead(500)
-                        res.end()
+                        res.end('Internal Server Error')
                     }
                     break
             
                 default:
                     res.writeHead(404)
-                    res.end()
+                    res.end('Not Found')
                     break
         }
     })

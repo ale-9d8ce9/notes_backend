@@ -1,6 +1,8 @@
 .DS_Store
 dotenv.js
 /notes/data
+/notes/logs
 test.js
 notes/notes.db
 notes/AES_GCM.key
+node_modules/

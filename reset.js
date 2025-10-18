@@ -18,7 +18,7 @@ const db = new sql.Database('notes/notes.db', (err) => {
         
     fs.mkdir('notes/data', (err) => {
         if (err) throw err
-        console.log("user files deleted")
+        console.log("users files deleted")
         
 })
 })
