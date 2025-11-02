@@ -606,28 +606,36 @@ async function exitWithError(err) {
 
 async function writeResponse(refuse) {
     // Set CORS headers to allow requests from any origin
-    res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-    res.setHeader('Content-Type', 'text/plain')
-
-    if (refuse) {
-        res.writeHead(400)
-        responseMessage = {
-            result: "error",
-            message: "Bad Request"
-        }
-        res.write(JSON.stringify(responseMessage))
-        console.log("refusing request")
-    } else {
-        if (settings.useEncryption) {
-            responseMessage = await secure.encrypt(AES_GCM_key, JSON.stringify(responseMessage))
-            console.log("encrypted response")
-        }
-        res.writeHead(200)
-        res.write(JSON.stringify(responseMessage))
+    try {
+        res.setHeader('Access-Control-Allow-Origin', '*')
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+        res.setHeader('Content-Type', 'text/plain')
+    } catch (e) {
+        console.error("Error setting response headers:", e)
     }
-    res.end()
+    try {
+        console.log("responding")
+        if (refuse) {
+            res.writeHead(400)
+            responseMessage = {
+                result: "error",
+                message: "Bad Request"
+            }
+            res.write(JSON.stringify(responseMessage))
+            console.log("refusing request")
+        } else {
+            if (settings.useEncryption) {
+                responseMessage = await secure.encrypt(AES_GCM_key, JSON.stringify(responseMessage))
+                console.log("encrypted response")
+            }
+            res.writeHead(200)
+            res.write(JSON.stringify(responseMessage))
+        }
+        res.end()
+    } catch (e) {
+        console.error("Error responding:", e)
+    }
     console.log("disconnecting")
     disconnectSQL()
 }

@@ -12,7 +12,7 @@ http.createServer((req, res) => {
         
         var u = url.parse(req.url, true)
         console.log('\n\n' + new Date().toISOString() + ' - new request: ' + u.pathname)
-        console.log('from ' + (req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0].trim()) // client IP address
+        console.log('from ' + req.socket.remoteAddress) // client IP address
             switch (u.pathname) {
                 case '/':
                     res.write('<h1>api server</h1>')
