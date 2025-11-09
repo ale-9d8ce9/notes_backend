@@ -608,7 +608,7 @@ async function writeResponse(refuse) {
     // Set CORS headers to allow requests from any origin
     try {
         res.setHeader('Access-Control-Allow-Origin', '*')
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        res.setHeader('Access-Control-Allow-Methods', 'POST')
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
         res.setHeader('Content-Type', 'text/plain')
     } catch (e) {
@@ -644,7 +644,7 @@ async function writeResponse(refuse) {
 
 function disconnectSQL() {
     db.close(function(err) {
-        if (err) {exitWithError(err);return;}
+        if (err) {console.error(err);return;}
         console.log("done")
     })
 }
